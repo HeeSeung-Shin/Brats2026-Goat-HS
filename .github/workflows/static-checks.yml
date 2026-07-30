@@ -1,0 +1,39 @@
+name: static-checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-repository:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Python sources
+        run: python -m compileall -q scripts src third_party
+
+      - name: Validate shell syntax
+        run: find scripts -type f -name '*.sh' -print0 | xargs -0 -r bash -n
+
+      - name: Validate JSON syntax
+        run: python -c "import json, pathlib; [json.loads(p.read_text()) for p in pathlib.Path('.').rglob('*.json')]"
+
+      - name: Check public-repository safety
+        run: python scripts/verify_public_repo.py .
+
+      - name: Check private-asset verifier CLI
+        run: python scripts/verify_assets.py --help
+
+      - name: Verify distributed source checksums
+        run: sha256sum -c provenance/source_checksums.sha256

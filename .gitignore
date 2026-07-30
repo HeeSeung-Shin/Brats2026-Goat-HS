@@ -1,0 +1,63 @@
+# Python and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments and local settings
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Repository-local setup state and dependency checkouts
+/.local/
+/third_party/nnUNet/
+
+# nnU-Net and experiment outputs
+nnUNet_data/
+outputs/
+results/
+logs/
+runs/
+wandb/
+*.log
+
+# Medical images and array/data artifacts
+*.nii
+*.nii.gz
+*.dcm
+*.mha
+*.mhd
+*.nrrd
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+
+# Model weights and exports
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+
+# Private case-level assets. Directory placeholders and a public README are OK.
+/private_assets/**
+!/private_assets/**/
+!/private_assets/**/.gitkeep
+!/private_assets/README.md
+
+# Patch/editor leftovers
+*.orig
+*.rej
+*~
+.DS_Store

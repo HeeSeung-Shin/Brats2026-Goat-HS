@@ -1,0 +1,17 @@
+{
+  "channel_names": {
+    "0": "t1n",
+    "1": "t1c",
+    "2": "t2w",
+    "3": "t2f"
+  },
+  "file_ending": ".nii.gz",
+  "labels": {
+    "ED": 2,
+    "ET": 3,
+    "NCR": 1,
+    "background": 0
+  },
+  "name": "Dataset007_Brats26_Goat_MLConsensusPseudo",
+  "numTraining": 2334
+}

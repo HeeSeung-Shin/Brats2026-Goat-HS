@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "paths": {
+    "dataset007_raw": null,
+    "dataset007_preprocessed": null,
+    "case_weights_dir": "private_assets/case_weights",
+    "d005_pretrained_root": "private_assets/pretrained_d005_resencm"
+  },
+  "environment_overrides": {
+    "dataset007_raw": "BRATS_D007_RAW",
+    "dataset007_preprocessed": "BRATS_D007_PREPROCESSED",
+    "case_weights_dir": "BRATS_CASE_WEIGHTS_DIR",
+    "d005_pretrained_root": "BRATS_D005_PRETRAINED_ROOT"
+  },
+  "expected_layout": {
+    "dataset007_raw": [
+      "dataset.json",
+      "dataset007_case_manifest.csv",
+      "imagesTr/",
+      "labelsTr/",
+      "imagesUn/"
+    ],
+    "dataset007_preprocessed": [
+      "splits_final.json"
+    ],
+    "case_weights_dir": [
+      "case_weights_fold0.json",
+      "case_weights_fold1.json",
+      "case_weights_fold2.json",
+      "case_weights_fold3.json",
+      "case_weights_fold4.json",
+      "d007_case_region_cluster_meta.csv"
+    ],
+    "d005_pretrained_root": [
+      "fold_0/checkpoint_best.pth",
+      "fold_1/checkpoint_best.pth",
+      "fold_2/checkpoint_best.pth",
+      "fold_3/checkpoint_best.pth",
+      "fold_4/checkpoint_best.pth"
+    ]
+  },
+  "notes": [
+    "Keep this public template free of workstation-specific absolute paths.",
+    "Use CLI options or the listed environment variables for assets stored outside the repository.",
+    "Private assets and checkpoints are intentionally excluded from Git."
+  ]
+}

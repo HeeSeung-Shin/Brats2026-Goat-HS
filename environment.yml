@@ -1,0 +1,13 @@
+name: brats-goat-resencm-softmoe-k4
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11.15
+  - pip
+  - setuptools
+  - wheel
+  - packaging
+  - ninja
+
+# The host must provide an NVIDIA driver compatible with the PyTorch CUDA 13
+# wheel. This file does not install or modify the system driver or CUDA toolkit.
