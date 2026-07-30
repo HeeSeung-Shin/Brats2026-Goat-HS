@@ -4,7 +4,7 @@ No BraTS image, label, pseudo-label, prediction, case list, or private metadata 
 
 ## Required supervised dataset
 
-The audited Dataset007 contains 2,334 supervised cases:
+The Dataset007 experiment contains 2,334 supervised cases:
 
 | Source | Count | Training role |
 |---|---:|---|
@@ -78,7 +78,7 @@ Each Dataset007 fold is initialized from the same-numbered standard ResEnc-M Dat
     ├── fold_3/checkpoint_best.pth
     └── fold_4/checkpoint_best.pth
 
-These are not BiSegMamba checkpoints. Exact hashes are in [../provenance/checkpoint_checksums.md](../provenance/checkpoint_checksums.md).
+Exact checkpoint hashes are in [../provenance/checkpoint_checksums.md](../provenance/checkpoint_checksums.md).
 
 ## Optional pseudo-label reconstruction
 

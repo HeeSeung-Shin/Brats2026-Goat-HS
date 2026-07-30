@@ -1,4 +1,4 @@
-# Audited runtime: CPython 3.11.15, PyTorch 2.11.0+cu130, CUDA 13.0.
+# Pinned runtime: CPython 3.11.15, PyTorch 2.11.0+cu130, CUDA 13.0.
 --extra-index-url https://download.pytorch.org/whl/cu130
 
 pip==26.0.1

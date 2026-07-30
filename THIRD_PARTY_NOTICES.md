@@ -6,8 +6,8 @@ This file is an attribution record, not legal advice or a substitute for complet
 
 - Project: nnU-Net
 - Upstream: https://github.com/MIC-DKFZ/nnUNet
-- Audited commit: f6d221d1b79cd2173650f78f97ecfee273e0cf86
-- Audited package version: 2.6.4
+- Pinned commit: f6d221d1b79cd2173650f78f97ecfee273e0cf86
+- Pinned package version: 2.6.4
 - License: Apache License 2.0
 - Local license copy: third_party/licenses/Apache-2.0.txt
 - Use: base training, preprocessing, validation, and inference framework
@@ -21,5 +21,3 @@ PyTorch, CUDA/cuDNN, dynamic-network-architectures, batchgenerators, NumPy, SciP
 ## BraTS 2026 GOAT
 
 BraTS data and challenge materials are not software dependencies covered by the code licenses above. Data access, citation, derived-label handling, and redistribution remain controlled by the applicable challenge/Synapse terms.
-
-This repository does not use or vendor BiSegMamba, SegMamba, Mamba, MONAI, or causal-conv1d.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Verify private assets required to reproduce the audited Dataset007 run.
+"""Verify private assets required to reproduce the Dataset007 experiment.
 
 The default checks are structural and fast. Pass ``--hash`` to also compute the
-audited SHA-256 values, including the five approximately 779 MiB D005
+recorded SHA-256 values, including the five approximately 779 MiB D005
 initialization checkpoints.
 """
 
@@ -99,7 +99,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hash",
         action="store_true",
-        help="Compute and compare audited SHA-256 values (slow for five checkpoints).",
+        help="Compute and compare recorded SHA-256 values (slow for five checkpoints).",
     )
     return parser.parse_args()
 

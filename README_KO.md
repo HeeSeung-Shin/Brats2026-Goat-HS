@@ -1,8 +1,8 @@
 # BraTS 2026 GOAT Dataset007 ResEnc-M SoftMoE K=4 학습 재현
 
-이 저장소는 다음 실험을 GitHub에서 공유하기 위한 코드·설정 스냅샷입니다.
+이 저장소는 다음 실험을 GitHub에서 공유하기 위한 코드와 설정입니다.
 
-| 항목 | 확인된 값 |
+| 항목 | 값 |
 |---|---|
 | 데이터셋 | Dataset007_Brats26_Goat_MLConsensusPseudo |
 | Backbone/plans | nnUNetResEncUNetMPlans_D005Compat |
@@ -12,8 +12,6 @@
 | Epoch | 500 |
 | SoftMoE K | 4 |
 | 초기화 | 동일 fold의 Dataset005 ResEnc-M checkpoint_best.pth |
-
-이것은 BiSegMamba 실험이 아닙니다. 표준 nnU-Net ResEnc-M 기반이며 Mamba, MONAI, 별도 CUDA extension을 사용하지 않습니다.
 
 > BraTS MRI, 정답, pseudo-label, case ID 목록, split, case weight, prediction, checkpoint는 포함하지 않았습니다. 공개 저장소에는 코드와 설정, 집계 결과, SHA-256만 올라갑니다.
 
@@ -38,7 +36,7 @@ EDA cluster를 gate의 정답이나 hard expert label로 사용하지 않습니�
 ## 1. 저장소 구조
 
     config/              dataset.json, ResEnc-M plans, 환경 기본값
-    docs/                데이터 준비, 실험 설정, 결과와 공개 체크리스트
+    docs/                데이터 준비, 실험 설정과 결과
     private_assets/      Git에 올라가지 않는 private 파일 배치 위치
     provenance/          코드와 checkpoint SHA-256
     requirements/        Python 의존성
@@ -63,7 +61,7 @@ EDA cluster를 gate의 정답이나 hard expert label로 사용하지 않습니�
 
     bash scripts/bootstrap.sh
 
-bootstrap은 고정된 nnU-Net commit을 clone하고 custom trainer overlay를 설치합니다. sudo, apt, NVIDIA driver 또는 시스템 CUDA를 변경하지 않으며 전처리나 학습도 시작하지 않습니다. 다만 wheel 다운로드와 Conda 환경 내부 설치로 디스크·네트워크를 사용합니다.
+bootstrap은 고정된 nnU-Net commit을 clone하고 custom trainer overlay와 재현 환경을 설치합니다.
 
 ## 3. 필요한 private 데이터 구조
 
@@ -130,7 +128,7 @@ hash 검사를 통과하기 전에는 재현 학습을 시작하지 않는 것�
 
     bash scripts/train_fold.sh 0
 
-fold 1–4도 반드시 같은 번호의 D005 checkpoint_best.pth로 초기화됩니다. 실제 보존 명령의 핵심은 다음과 같습니다.
+fold 1–4도 반드시 같은 번호의 D005 checkpoint_best.pth로 초기화됩니다. 실제 학습 명령의 핵심은 다음과 같습니다.
 
     SOFTMOE_NUM_EXPERTS=4     SOFTMOE_MAX_EPOCHS=500     SOFTMOE_INIT_CHECKPOINT=/private/d005/fold_0/checkpoint_best.pth     nnUNetv2_train 7 3d_fullres 0       -tr nnUNetTrainer_D007ETTCRegionAuxHead_SoftMoEConfigK_Pilot       -p nnUNetResEncUNetMPlans_D005Compat       -device cuda
 
@@ -160,7 +158,7 @@ checkpoint_final.pth를 검증하려면 다음을 사용합니다.
 
     bash scripts/validate_fold.sh 0 --final
 
-## 9. 감사된 결과와 제한
+## 9. 결과와 제한
 
 5-fold case-weighted original-GT-only 평균:
 
@@ -171,16 +169,4 @@ checkpoint_final.pth를 검증하려면 다음을 사용합니다.
 
 이는 로컬 validation 결과이며 BraTS 공식 leaderboard 점수가 아닙니다.
 
-중요한 제한으로 fold 0 gate audit는 확률이 거의 균등했지만 dominant expert fraction이 1.0이었고 collapse_warning=True였습니다. 따라서 K=4를 의미 있는 expert specialization의 증거로 해석하면 안 됩니다. 정확한 fold별 값은 [RESULTS.md](docs/RESULTS.md)에 있습니다.
-
-## 10. GitHub 업로드
-
-custom code 공개 라이선스와 저자 정보를 먼저 확정합니다.
-
-    python scripts/verify_public_repo.py
-    git diff --cached --check
-    git commit -m "Add Dataset007 ResEnc-M SoftMoE K4 reproduction snapshot"
-    git remote add origin https://github.com/<USER_OR_ORG>/<REPOSITORY>.git
-    git push -u origin main
-
-private_assets에서 README 이외의 파일을 commit하지 마십시오. checkpoint 공개가 필요하다면 BraTS 및 모델 가중치 재배포 권한을 별도로 확인해야 합니다.
+중요한 제한으로 fold 0 gate 분석에서는 확률이 거의 균등했지만 dominant expert fraction이 1.0이었고 collapse_warning=True였습니다. 따라서 K=4를 의미 있는 expert specialization의 증거로 해석하면 안 됩니다. 정확한 fold별 값은 [RESULTS.md](docs/RESULTS.md)에 있습니다.

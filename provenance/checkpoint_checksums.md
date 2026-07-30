@@ -1,6 +1,6 @@
 # Checkpoint provenance
 
-No checkpoint is distributed in this repository. The hashes below identify the exact private files audited on 2026-07-30.
+No checkpoint is distributed in this repository. The hashes below identify the exact private files used in the experiment.
 
 ## Dataset005 ResEnc-M initialization checkpoint_best.pth
 

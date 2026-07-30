@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-components",
         action="store_true",
-        help="Skip ET/TC/WT connected-component counts. By default these are computed for the region aux-head audit.",
+        help="Skip ET/TC/WT connected-component counts. By default these are computed for the region auxiliary-head analysis.",
     )
     return parser.parse_args()
 

@@ -92,7 +92,7 @@ def main() -> int:
     if failed:
         print(f"WARNING: {len(failed)} non-strict environment difference(s).")
     else:
-        print("PASS: audited ResEnc-M SoftMoE K=4 environment matches.")
+        print("PASS: ResEnc-M SoftMoE K=4 environment matches.")
     return 0
 
 

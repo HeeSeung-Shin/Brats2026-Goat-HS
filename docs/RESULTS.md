@@ -1,6 +1,6 @@
-# Audited K=4 results
+# K=4 results
 
-The table below was reconstructed from each fold's explicit checkpoint_best.pth validation directory and the original-GT-only ET/TC/WT evaluation summaries.
+The table below was computed from each fold's explicit checkpoint_best.pth validation directory and the original-GT-only ET/TC/WT evaluation summaries.
 
 | Fold | Cases | ET Dice | TC Dice | WT Dice | Mean | nnU-Net foreground Dice | best checkpoint current_epoch |
 |---:|---:|---:|---:|---:|---:|---:|---:|
@@ -21,9 +21,9 @@ Case-weighted five-fold means:
 
 The checkpoint current_epoch field is nnU-Net metadata. For example, fold 0 checkpoint current_epoch=496 corresponds to the last best log event during zero-based log epoch 495. It should not be presented as a one-based publication epoch without explaining this convention.
 
-## Gate audit
+## Gate analysis
 
-The preserved K-selection report characterized fold-0 K=4 as optional_diagnostic:
+The K-selection report characterized fold-0 K=4 as optional_diagnostic:
 
 - 100 cases with gate logs;
 - mean gates: 0.2555, 0.2537, 0.2372, 0.2536;
@@ -33,11 +33,11 @@ The preserved K-selection report characterized fold-0 K=4 as optional_diagnostic
 - collapse_warning: true;
 - fold/source artifact warnings: false.
 
-Near-uniform probabilities do not eliminate the dominant-expert collapse warning because the same expert won argmax for all audited cases. Do not claim that four specialized experts emerged from this evidence.
+Near-uniform probabilities do not eliminate the dominant-expert collapse warning because the same expert won argmax for all evaluated cases. Do not claim that four specialized experts emerged from this evidence.
 
 ## Checkpoint averaging artifact
 
-A post-training arithmetic mean over all 995 floating network tensors of the five checkpoint_best.pth files was preserved as checkpoint_average_best_5fold.pth. Its SHA-256 and the input hashes are listed in provenance/checkpoint_checksums.md.
+A post-training arithmetic mean over all 995 floating network tensors of the five checkpoint_best.pth files is provided as checkpoint_average_best_5fold.pth. Its SHA-256 and the input hashes are listed in provenance/checkpoint_checksums.md.
 
 Weight averaging is not the same operation as prediction-probability ensembling. The presence of this artifact does not establish that it is superior or that it was used for every submission. scripts/average_nnunet_checkpoints.py is provided only to reproduce the recorded arithmetic operation.
 

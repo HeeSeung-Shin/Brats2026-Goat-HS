@@ -20,7 +20,7 @@ command -v "${PYTHON_BOOTSTRAP_BIN}" >/dev/null 2>&1 || die "Python not found: $
 actual_python="$("${PYTHON_BOOTSTRAP_BIN}" -c 'import platform; print(platform.python_version())')"
 if [[ "${actual_python}" != "${EXPECTED_PYTHON_VERSION}" ]]; then
   if [[ "${ALLOW_NONEXACT}" == "1" ]]; then
-    warn "Python ${actual_python} differs from audited ${EXPECTED_PYTHON_VERSION}."
+    warn "Python ${actual_python} differs from expected ${EXPECTED_PYTHON_VERSION}."
   else
     die "Exact bootstrap requires Python ${EXPECTED_PYTHON_VERSION}; found ${actual_python}."
   fi

@@ -1,8 +1,8 @@
 # BraTS 2026 GOAT Dataset007 ResEnc-M SoftMoE K=4
 
-This repository is a code/configuration snapshot for the audited five-fold experiment:
+This repository contains code and configuration for the five-fold experiment:
 
-| Field | Audited value |
+| Field | Value |
 |---|---|
 | Dataset | Dataset007_Brats26_Goat_MLConsensusPseudo |
 | Backbone/plans | nnUNetResEncUNetMPlans_D005Compat |
@@ -13,13 +13,11 @@ This repository is a code/configuration snapshot for the audited five-fold exper
 | SoftMoE experts | 4 |
 | Initialization | fold-matched Dataset005 ResEnc-M checkpoint_best.pth |
 
-This is the corrected ResEnc-M experiment package. It does not contain or require BiSegMamba, Mamba, MONAI, or custom CUDA extensions.
-
 > Raw MRI, labels, pseudo-labels, case identifiers, split files, case weights, predictions, and checkpoints are not included. Obtain and use BraTS assets only under the applicable challenge/Synapse terms.
 
 한국어 사용법은 [README_KO.md](README_KO.md)를 참고하십시오.
 
-## Method snapshot
+## Method
 
 The standard nnU-Net ResEnc-M encoder/decoder is augmented with:
 
@@ -28,7 +26,7 @@ The standard nnU-Net ResEnc-M encoder/decoder is augmented with:
 - case-level soft routing from global-average-pooled bottleneck features;
 - temperature 1.0, balance-loss weight 0.001, and adapter scale initialized to 0.1;
 - an ET/TC/WT auxiliary head used only during training;
-- pseudo-label loss weighting with the audited ramp curriculum;
+- pseudo-label loss weighting with the ramp curriculum;
 - fold-specific ET-aware case-sampling weights.
 
 The main four-class nnU-Net segmentation head remains the inference output. No EDA cluster or hard routing label is supplied to the gate.
@@ -36,10 +34,10 @@ The main four-class nnU-Net segmentation head remains the inference output. No E
 ## Repository layout
 
     config/              dataset.json, ResEnc-M plans, and environment defaults
-    docs/                data preparation, experiment, results, and publication notes
+    docs/                data preparation, experiment configuration, and results
     private_assets/      local-only asset contract; contents are Git-ignored
     provenance/          source and checkpoint SHA-256 records
-    requirements/        audited Python dependency baseline
+    requirements/        pinned Python dependencies
     scripts/data/        pseudo-label and Dataset007 preparation tools
     scripts/             setup, verification, training, validation, and evaluation
     src/nnunet_overlays/ custom trainer import closure
@@ -55,7 +53,7 @@ Create an isolated environment:
     DRY_RUN=1 bash scripts/bootstrap.sh
     bash scripts/bootstrap.sh
 
-The bootstrap clones pinned nnU-Net commit `f6d221d1b79cd2173650f78f97ecfee273e0cf86`, installs the five-file trainer overlay, and does not preprocess data or start training. It does not use sudo/apt or change the NVIDIA driver/system CUDA.
+The bootstrap clones pinned nnU-Net commit `f6d221d1b79cd2173650f78f97ecfee273e0cf86` and installs the five-file trainer overlay.
 
 Set private paths in the shell:
 
@@ -94,11 +92,11 @@ Validate checkpoint_best.pth and compute original-GT-only ET/TC/WT Dice:
 
 Use `--final` with validate_fold.sh only when checkpoint_final.pth is intended.
 
-## Audited results and limitation
+## Results and limitation
 
 The five-fold case-weighted original-GT-only means were ET 0.8709, TC 0.9122, WT 0.9280, and mean Dice 0.9037. These are local validation values, not an official challenge leaderboard score.
 
-The preserved fold-0 gate audit reported near-uniform gate probabilities but a dominant-expert fraction of 1.0 and `collapse_warning=True`. Treat K=4 as an audited experimental configuration, not evidence of clinically meaningful expert specialization. See [docs/RESULTS.md](docs/RESULTS.md).
+The fold-0 gate analysis reported near-uniform gate probabilities but a dominant-expert fraction of 1.0 and `collapse_warning=True`. Treat K=4 as an experimental configuration, not evidence of clinically meaningful expert specialization. See [docs/RESULTS.md](docs/RESULTS.md).
 
 ## Reproducibility boundary
 
@@ -106,22 +104,9 @@ Exact reproduction requires the frozen manifest, five-fold split, fold-specific 
 
 The run is not guaranteed bitwise deterministic because GPU kernels, AMP, augmentation workers, driver/toolchain differences, and scheduling may change numerical results.
 
-## Publication
-
-Review [LICENSE_STATUS.md](LICENSE_STATUS.md) and [docs/PUBLICATION_CHECKLIST.md](docs/PUBLICATION_CHECKLIST.md) before making a public repository. No GitHub remote or push is performed by these scripts.
-
-    python scripts/verify_public_repo.py
-    git diff --cached --check
-    git commit -m "Add Dataset007 ResEnc-M SoftMoE K4 reproduction snapshot"
-    git remote add origin https://github.com/<USER_OR_ORG>/<REPOSITORY>.git
-    git push -u origin main
-
-Do not use a credential-bearing URL and do not commit private_assets content other than its README.
-
 ## Documentation
 
 - [Data preparation](docs/DATA_PREPARATION.md)
 - [Exact experiment](docs/EXPERIMENT.md)
-- [Audited results](docs/RESULTS.md)
+- [Results](docs/RESULTS.md)
 - [Checkpoint hashes](provenance/checkpoint_checksums.md)
-- [Publication checklist](docs/PUBLICATION_CHECKLIST.md)

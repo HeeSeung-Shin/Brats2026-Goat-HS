@@ -59,7 +59,7 @@ The loader copies 956 compatible tensors and intentionally leaves 39 new tensors
 
 Resume mode uses nnUNetv2_train --c and sets SOFTMOE_INIT_CHECKPOINT to an empty string.
 
-## Audited command
+## Training command
 
 For fold 0:
 
@@ -82,8 +82,6 @@ Repository wrappers reproduce these choices and add fail-fast hash checks.
 - batchgenerators 0.25.1
 - batchgeneratorsv2 0.3.2
 - NVIDIA GeForce RTX 5090, driver 580.126.20
-
-BiSegMamba, Mamba, MONAI, and custom CUDA extensions are not part of this experiment.
 
 ## Determinism
 
