@@ -131,8 +131,13 @@ increases linearly to `0.7` at epoch 150, and remains `0.7`. Sampling is from
 one pooled annotated/pseudo dataset with normalized replacement weights and no
 fixed source quota. The auxiliary head is bypassed at inference; the dense
 adapter remains active. The paper training used an NVIDIA GeForce RTX 5090.
+All student parameters are jointly fine-tuned; the auxiliary head and dense
+adapter are newly initialized.
 
 ## Final five-fold inference
+
+Set `INPUT_DIR` and `OUTPUT_DIR` to user-provided input and output paths before
+running this placeholder example.
 
 ```bash
 python scripts/final_inference.py \
@@ -141,11 +146,11 @@ python scripts/final_inference.py \
   --plans-json config/nnUNetResEncUNetMPlans_D005Compat.json \
   --dataset-json config/dataset.json \
   --configuration 3d_fullres \
-  --checkpoint-fold0 "${FINAL_RESULTS}/fold_0/checkpoint_best.pth" \
-  --checkpoint-fold1 "${FINAL_RESULTS}/fold_1/checkpoint_best.pth" \
-  --checkpoint-fold2 "${FINAL_RESULTS}/fold_2/checkpoint_best.pth" \
-  --checkpoint-fold3 "${FINAL_RESULTS}/fold_3/checkpoint_best.pth" \
-  --checkpoint-fold4 "${FINAL_RESULTS}/fold_4/checkpoint_best.pth" \
+  --checkpoint-fold0 "${RESULT_ROOT}/fold_0/checkpoint_best.pth" \
+  --checkpoint-fold1 "${RESULT_ROOT}/fold_1/checkpoint_best.pth" \
+  --checkpoint-fold2 "${RESULT_ROOT}/fold_2/checkpoint_best.pth" \
+  --checkpoint-fold3 "${RESULT_ROOT}/fold_3/checkpoint_best.pth" \
+  --checkpoint-fold4 "${RESULT_ROOT}/fold_4/checkpoint_best.pth" \
   --device cuda
 ```
 
@@ -161,7 +166,7 @@ For a functional model/checkpoint/forward check on available hardware:
 ```bash
 python scripts/verify_environment.py --strict
 python scripts/smoke_test_model.py --device cuda \
-  --checkpoint "${FINAL_RESULTS}/fold_0/checkpoint_best.pth"
+  --checkpoint "${RESULT_ROOT}/fold_0/checkpoint_best.pth"
 ```
 
 Use `verify_environment.py --strict --exact-hardware` only when the paper's RTX
@@ -169,11 +174,14 @@ Use `verify_environment.py --strict --exact-hardware` only when the paper's RTX
 
 ## Evaluation
 
+Set `PREDICTION_DIR` to the user-provided prediction path before running this
+placeholder example.
+
 ```bash
 python scripts/evaluate_original_gt.py \
   --prediction-dir "${PREDICTION_DIR}" \
-  --dataset005-labels "${DATASET005_LABELS}" \
-  --splits-json "${SPLITS_JSON}" \
+  --dataset005-labels "${D005_LABELS_DIR}" \
+  --splits-json "${PRIVATE_SPLITS}" \
   --fold all \
   --output-csv metrics.csv \
   --summary-csv metrics.summary.csv \
@@ -199,12 +207,19 @@ as outputs recomputed by this public repository.
 
 ## Limitations
 
-Private data, pseudo-label assets, fold-specific sampling weights, and teacher
-and student checkpoints are not distributed, so end-to-end execution requires
-authorized external inputs. RTX 4090 smoke testing is functional verification
-only and does not guarantee numerical identity with the paper's RTX 5090 run.
-MedNeXt, BI-SegMamba, and heterogeneous-ensemble numbers in the paper are
-comparison results; those systems are not implemented here.
+This repository targets only the final ResEnc-M K=4 system. Authorized private
+inputs are required for the BraTS data, ResEnc-M/L teacher checkpoints, exact
+Dataset005 split, pseudo-label assets, student checkpoints, and fold-specific
+ET-aware sampling weights; because neither the weight files nor their
+unpublished generation formula is distributed, a numerically identical
+training run cannot be reproduced from scratch without those assets. Tables
+1–4 analyses—including labeled-only, all-pseudo, auxiliary-off, K=2/3/5, and
+paired statistical comparisons—are outside this repository's scope, as are the
+paper's MedNeXt, BI-SegMamba, and heterogeneous-ensemble comparisons. The data
+augmenter may run nondeterministically, so bitwise-identical results are not
+guaranteed even in the same environment; RTX 4090 smoke testing is functional
+verification only and does not guarantee numerical identity with the paper's
+RTX 5090 run.
 
 ## Citation
 
