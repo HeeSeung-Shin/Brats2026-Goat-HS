@@ -4,10 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 export REPO_ROOT
-# shellcheck source=../config/experiment.env
-source "${REPO_ROOT}/config/experiment.env"
 
 EXECUTE=0
+REQUEST_DRY_RUN=0
+FOLDS_ARG=""
+GPU_ARG=""
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--folds "0 1 2 3 4"] [--gpu-id ID] [--execute] [--dry-run]
@@ -16,29 +17,32 @@ Default behavior is preflight/dry-run only. Full sequential training requires:
   CONFIRM_FULL_TRAINING=YES $(basename "$0") --execute
 EOF
 }
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --folds) FOLDS="${2:?--folds requires a value}"; export FOLDS; shift 2 ;;
-    --gpu-id) GPU_ID="${2:?--gpu-id requires a value}"; export GPU_ID; shift 2 ;;
+    --folds) FOLDS_ARG="${2:?--folds requires a value}"; shift 2 ;;
+    --gpu-id) GPU_ARG="${2:?--gpu-id requires a value}"; shift 2 ;;
     --execute) EXECUTE=1; shift ;;
-    --dry-run) DRY_RUN=1; export DRY_RUN; shift ;;
+    --dry-run) REQUEST_DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+source "${REPO_ROOT}/config/experiment.env"
+[[ -z "${FOLDS_ARG}" ]] || export FOLDS="${FOLDS_ARG}"
+[[ -z "${GPU_ARG}" ]] || export GPU_ID="${GPU_ARG}"
+[[ "${REQUEST_DRY_RUN}" == "0" ]] || { DRY_RUN=1; export DRY_RUN; }
 
 die() { printf '[train-5fold] ERROR: %s\n' "$*" >&2; exit 1; }
 log() { printf '[train-5fold] %s\n' "$*"; }
-
 read -r -a fold_array <<< "${FOLDS}"
 [[ "${#fold_array[@]}" -gt 0 ]] || die "No folds selected"
 for fold in "${fold_array[@]}"; do [[ "${fold}" =~ ^[0-4]$ ]] || die "Invalid fold: ${fold}"; done
 
+log "student=ResEnc-M K=4 dense adapter; folds=${FOLDS}"
 if [[ "${EXECUTE}" != "1" || "${DRY_RUN}" == "1" ]]; then
   log "Preflight only; no fold will be trained."
   for fold in "${fold_array[@]}"; do
-    DRY_RUN=1 "${SCRIPT_DIR}/train_fold.sh" "${fold}" --gpu-id "${GPU_ID}"
+    "${SCRIPT_DIR}/train_fold.sh" "${fold}" --gpu-id "${GPU_ID}" --dry-run
   done
   log "To start sequential training, set CONFIRM_FULL_TRAINING=YES and pass --execute."
   exit 0

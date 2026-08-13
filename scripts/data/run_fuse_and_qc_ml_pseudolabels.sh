@@ -14,7 +14,7 @@ MAX_CASES=""
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [options] [extra fuse_resencM_L_pseudolabels.py args]
+Usage: $(basename "$0") [options]
 
 Options:
   --overwrite       Replace existing fused_labels/qc/manifests/reports outputs.
@@ -27,13 +27,12 @@ Examples:
 EOF
 }
 
-EXTRA_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --overwrite) OVERWRITE=true; shift ;;
     --max_cases) MAX_CASES="${2:?--max_cases requires a value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    *) EXTRA_ARGS+=("$1"); shift ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
@@ -49,14 +48,7 @@ cmd=(
   --m_pred_dir "${M_PRED_DIR}"
   --l_pred_dir "${L_PRED_DIR}"
   --out_root "${OUT_ROOT}"
-  --mode regionwise
   --prob_spatial_permutation auto
-  --et_threshold 0.50
-  --tc_threshold 0.50
-  --wt_threshold 0.50
-  --w_et_m 0.70
-  --w_tc_m 0.50
-  --w_wt_m 0.40
 )
 
 if [[ "${OVERWRITE}" == "true" ]]; then
@@ -65,8 +57,6 @@ fi
 if [[ -n "${MAX_CASES}" ]]; then
   cmd+=(--max_cases "${MAX_CASES}")
 fi
-cmd+=("${EXTRA_ARGS[@]}")
-
 printf '+'
 printf ' %q' "${cmd[@]}"
 printf '\n'

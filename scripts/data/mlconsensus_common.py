@@ -5,8 +5,6 @@ import csv
 import json
 import math
 import os
-import shutil
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,9 +37,6 @@ RESENC_L_RESULTS = Path(os.environ.get("RESENC_L_RESULTS", str(NNUNET_RESULTS_RO
 OUT_ROOT = Path(os.environ.get("PSEUDOLABEL_ROOT", str(REPO_ROOT / "private_assets" / "pseudolabels_resencML_5fold_best")))
 DATASET007_ROOT = Path(os.environ.get("DATASET007_ROOT", str(NNUNET_RAW_ROOT / "Dataset007_Brats26_Goat_MLConsensusPseudo")))
 DATASET007_PREPROCESSED = Path(os.environ.get("DATASET007_PREPROCESSED", str(NNUNET_PREPROCESSED_ROOT / "Dataset007_Brats26_Goat_MLConsensusPseudo")))
-
-HS_SEG_PYTHON = Path(os.environ.get("PYTHON_BIN", sys.executable))
-HS_SEG_NNUNET_PREDICT = Path(os.environ.get("NNUNET_PREDICT", shutil.which("nnUNetv2_predict") or "nnUNetv2_predict"))
 
 EXPECTED_UNLABELED_CASES = 1138
 EXPECTED_LABELED_CASES = 1351
@@ -271,11 +266,13 @@ def dice(mask_a: np.ndarray, mask_b: np.ndarray) -> float:
     vol_a = int(a.sum())
     vol_b = int(b.sum())
     if vol_a == 0 and vol_b == 0:
+        # Agreement between two empty teacher masks is complete. This is
+        # intentionally distinct from evaluate_original_gt.py, where
+        # both-empty case/region pairs are NaN and excluded from means.
         return 1.0
-    denom = vol_a + vol_b
-    if denom == 0:
+    if vol_a == 0 or vol_b == 0:
         return 0.0
-    return float(2.0 * np.logical_and(a, b).sum() / denom)
+    return float(2.0 * np.logical_and(a, b).sum() / (vol_a + vol_b))
 
 
 def region_volumes(label: np.ndarray, voxel_volume_mm3: float = 1.0) -> dict[str, Any]:

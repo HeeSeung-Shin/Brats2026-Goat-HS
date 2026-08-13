@@ -1,112 +1,225 @@
-# BraTS 2026 GOAT Dataset007 ResEnc-M SoftMoE K=4
+# AIstatLab at BraTS-GoAT 2026 Task 3: Quality-Controlled Consensus Pseudo-Labeling and Dense Expert Adaptation
 
-This repository contains code and configuration for the five-fold experiment:
+This repository implements the paper's final **ResEnc-M, K=4, five-fold**
+system. It contains the consensus pseudo-label/QC path, mixed-supervision
+student trainer, final regional submission inference, evaluation, and
+lightweight tests.
 
-| Field | Value |
-|---|---|
-| Dataset | Dataset007_Brats26_Goat_MLConsensusPseudo |
-| Backbone/plans | nnUNetResEncUNetMPlans_D005Compat |
-| Trainer | nnUNetTrainer_D007ETTCRegionAuxHead_SoftMoEConfigK_Pilot |
-| Configuration | 3d_fullres |
-| Folds | 0, 1, 2, 3, 4 |
-| Epochs | 500 |
-| SoftMoE experts | 4 |
-| Initialization | fold-matched Dataset005 ResEnc-M checkpoint_best.pth |
+The two five-fold ResEnc-M/L teacher families generate logits that are equally
+averaged within each family before softmax. Their ET/TC/WT probabilities are
+fused with ResEnc-M weights `0.70/0.50/0.40`, thresholded at `0.50`, corrected
+to `ET ⊆ TC ⊆ WT`, and screened by the paper's confidence, uncertainty,
+coverage, component, and inter-teacher agreement rules. The paper reports 983
+retained cases from 1,138 unlabeled cases, used with 1,351 annotated cases.
 
-> Raw MRI, labels, pseudo-labels, case identifiers, split files, case weights, predictions, and checkpoints are not included. Obtain and use BraTS assets only under the applicable challenge/Synapse terms.
+The student is a six-stage ResEnc-M with channels
+`[32, 64, 128, 256, 320, 320]`, blocks `[1, 3, 4, 6, 6, 6]`, a training-only
+ET/TC/WT auxiliary head, and a dense K=4 adapter at the final 320-channel
+encoder skip. All experts process every patch and are combined by soft routing.
+`SoftMoE` is retained only as the internal class identifier for this dense
+expert adapter. The auxiliary loss weights are ET `0.2`, TC `0.2`, WT `0.1`;
+the adapter uses temperature `1`, residual scale initialization `0.1`, and
+balance coefficient `0.001`.
 
-한국어 사용법은 [README_KO.md](README_KO.md)를 참고하십시오.
+## Installation
 
-## Method
+```bash
+conda env create -f environment.yml
+conda activate brats-goat-resencm-softmoe-k4
+export VENV_DIR="${CONDA_PREFIX}" PYTHON_BOOTSTRAP_BIN=python
+bash scripts/bootstrap.sh
+source config/experiment.env
+```
 
-The standard nnU-Net ResEnc-M encoder/decoder is augmented with:
+`requirements/base.txt` pins the paper runtime and `bootstrap.sh` installs the
+pinned nnU-Net revision plus the repository overlay. Set `nnUNet_raw`,
+`nnUNet_preprocessed`, and `nnUNet_results` before sourcing the configuration
+when using other authorized storage roots.
 
-- a residual SoftMoE adapter at the deepest encoder feature;
-- four lightweight 3D convolutional experts;
-- case-level soft routing from global-average-pooled bottleneck features;
-- temperature 1.0, balance-loss weight 0.001, and adapter scale initialized to 0.1;
-- an ET/TC/WT auxiliary head used only during training;
-- pseudo-label loss weighting with the ramp curriculum;
-- fold-specific ET-aware case-sampling weights.
+## Required inputs
 
-The main four-class nnU-Net segmentation head remains the inference output. No EDA cluster or hard routing label is supplied to the gate.
+BraTS/Synapse terms prevent this repository from distributing MRI, ground
+truth, derived pseudo-labels, or checkpoints. The workflow therefore requires:
 
-## Repository layout
+```text
+${nnUNet_raw}/Dataset005_Brats26_Goat_With_GroundTruth/
+├── imagesTr/<case>_{0000,0001,0002,0003}.nii.gz
+├── labelsTr/<case>.nii.gz
+└── imagesUn/<case>_{0000,0001,0002,0003}.nii.gz
 
-    config/              dataset.json, ResEnc-M plans, and environment defaults
-    docs/                data preparation, experiment configuration, and results
-    private_assets/      local-only asset contract; contents are Git-ignored
-    provenance/          source and checkpoint SHA-256 records
-    requirements/        pinned Python dependencies
-    scripts/data/        pseudo-label and Dataset007 preparation tools
-    scripts/             setup, verification, training, validation, and evaluation
-    src/nnunet_overlays/ custom trainer import closure
+private_assets/
+├── splits_final.json
+├── case_weights/case_weights_fold{0,1,2,3,4}.json
+└── pretrained_d005_resencm/fold_{0,1,2,3,4}/checkpoint_best.pth
+```
 
-## Quick start
+The ResEnc-M/L teacher checkpoints and the five final student checkpoints must
+also be supplied through authorized nnU-Net result storage. Fold-specific
+ET-aware weight JSONs are required inputs but are not distributed with the
+public repository. Their generation formula is not specified by the paper, so
+the public code only validates exact case IDs, finite values in `[1.1, 2.0]`,
+normalization for replacement sampling, and optionally the approximately 55.5%
+annotated sampling mass. See `private_assets/README.md` for the full layout.
 
-Create an isolated environment:
+## Preprocessing
 
-    conda env create -f environment.yml
-    conda activate brats-goat-resencm-softmoe-k4
-    export VENV_DIR="$CONDA_PREFIX"
-    export PYTHON_BOOTSTRAP_BIN=python
-    DRY_RUN=1 bash scripts/bootstrap.sh
-    bash scripts/bootstrap.sh
+After pseudo-label construction and split preparation below:
 
-The bootstrap clones pinned nnU-Net commit `f6d221d1b79cd2173650f78f97ecfee273e0cf86` and installs the five-file trainer overlay.
+```bash
+bash scripts/prepare_preprocessing.sh --np 4
+```
 
-Set private paths in the shell:
+This installs the provided final 3D plan and annotated-only validation splits,
+then runs nnU-Net fingerprinting and preprocessing. The final plan uses patch
+size `128×160×112` and batch size 2.
 
-    export nnUNet_raw=/absolute/private/path/nnUNet_raw
-    export nnUNet_preprocessed=/absolute/private/path/nnUNet_preprocessed
-    export nnUNet_results=/absolute/private/path/nnUNet_results_K4
-    export PRIVATE_MANIFEST=/absolute/private/path/dataset007_case_manifest.csv
-    export PRIVATE_SPLITS=/absolute/private/path/splits_final.json
-    export CASE_WEIGHT_ROOT=/absolute/private/path/case_weights
-    export D005_PRETRAINED_ROOT=/absolute/private/path/d005_resencm_experiment
-    export D005_LABELS_DIR=/absolute/private/path/Dataset005/labelsTr
+## Pseudo-label generation and strict QC
 
-Verify and prepare:
+Register five `checkpoint_best.pth` folds for both teacher plans in the
+authorized nnU-Net result tree, then run:
 
-    python scripts/verify_assets.py
-    python scripts/verify_assets.py --hash
-    DRY_RUN=1 bash scripts/prepare_preprocessing.sh
-    bash scripts/prepare_preprocessing.sh
+```bash
+bash scripts/data/run_resencML_pseudolabel_inference.sh --execute --gpu-id 0
+bash scripts/data/run_fuse_and_qc_ml_pseudolabels.sh --overwrite
 
-Train one fold:
+python scripts/data/build_dataset007_mlconsensus.py \
+  --source-dataset-root "${nnUNet_raw}/Dataset005_Brats26_Goat_With_GroundTruth" \
+  --pseudolabel-root private_assets/pseudolabels_resencML_5fold_best \
+  --target-dataset-root "${nnUNet_raw}/Dataset007_Brats26_Goat_MLConsensusPseudo" \
+  --overwrite true
 
-    DRY_RUN=1 bash scripts/train_fold.sh 0
-    bash scripts/train_fold.sh 0
+python scripts/data/create_dataset007_gtval_splits.py \
+  --dataset007-root "${nnUNet_raw}/Dataset007_Brats26_Goat_MLConsensusPseudo" \
+  --dataset005-splits "${nnUNet_preprocessed}/Dataset005_Brats26_Goat_With_GroundTruth/splits_final.json" \
+  --output-json private_assets/splits_final.json \
+  --out-dir private_assets/split_reports
+```
 
-Preflight all folds, then explicitly launch five sequential 500-epoch jobs:
+Teacher-specific agreement masks are derived from probabilities, not argmax
+NIfTI labels: `ET=p_ET`, `TC=p_NCR+p_ET`, and
+`WT=p_NCR+p_ED+p_ET`, followed by thresholding and hierarchy correction. Strict
+agreement requires WT Dice ≥0.85, TC Dice ≥0.70, and ET Dice ≥0.50. Both-empty
+ET passes; one-sided ET passes only when its present volume is below 5 mm³.
 
-    bash scripts/train_5fold.sh
-    CONFIRM_FULL_TRAINING=YES bash scripts/train_5fold.sh --execute
+The fused prediction must have mean foreground confidence ≥0.70, normalized
+entropy ≤0.35, margin ≥0.20, high-confidence foreground fraction ≥0.60, and
+foreground coverage in `[10⁻⁵, 0.30]`. Small WT/TC/ET components use volume
+thresholds `5/3/1 mm³` together with mean/max probability thresholds
+`0.15/0.30`; ET suppression uses `1 mm³/0.35`. Final masks are reconstructed as
+ET→3, TC\ET→1, WT\TC→2, and background→0.
 
-Validate checkpoint_best.pth and compute original-GT-only ET/TC/WT Dice:
+Validate each externally supplied sampling file before training:
 
-    bash scripts/validate_fold.sh 0 --dry-run
-    bash scripts/validate_fold.sh 0
-    bash scripts/evaluate_fold.sh 0 --dry-run
-    bash scripts/evaluate_fold.sh 0
+```bash
+python scripts/data/validate_case_weights.py \
+  --weights private_assets/case_weights/case_weights_fold0.json \
+  --splits-json private_assets/splits_final.json \
+  --fold 0 \
+  --manifest "${nnUNet_raw}/Dataset007_Brats26_Goat_MLConsensusPseudo/dataset007_case_manifest.csv"
+```
 
-Use `--final` with validate_fold.sh only when checkpoint_final.pth is intended.
+## Five-fold training
 
-## Results and limitation
+```bash
+CONFIRM_FULL_TRAINING=YES bash scripts/train_5fold.sh --execute --gpu-id 0
+```
 
-The five-fold case-weighted original-GT-only means were ET 0.8709, TC 0.9122, WT 0.9280, and mean Dice 0.9037. These are local validation values, not an official challenge leaderboard score.
+The fixed final defaults are 500 epochs, 250/50 training/validation iterations
+per epoch, batch size 2, foreground oversampling `0.5`, learning rate `5e-4`,
+and gradient clipping `12`. Pseudo-label loss weight is `0.3` before epoch 50,
+increases linearly to `0.7` at epoch 150, and remains `0.7`. Sampling is from
+one pooled annotated/pseudo dataset with normalized replacement weights and no
+fixed source quota. The auxiliary head is bypassed at inference; the dense
+adapter remains active. The paper training used an NVIDIA GeForce RTX 5090.
 
-The fold-0 gate analysis reported near-uniform gate probabilities but a dominant-expert fraction of 1.0 and `collapse_warning=True`. Treat K=4 as an experimental configuration, not evidence of clinically meaningful expert specialization. See [docs/RESULTS.md](docs/RESULTS.md).
+## Final five-fold inference
 
-## Reproducibility boundary
+```bash
+python scripts/final_inference.py \
+  --input-dir "${INPUT_DIR}" \
+  --output-dir "${OUTPUT_DIR}" \
+  --plans-json config/nnUNetResEncUNetMPlans_D005Compat.json \
+  --dataset-json config/dataset.json \
+  --configuration 3d_fullres \
+  --checkpoint-fold0 "${FINAL_RESULTS}/fold_0/checkpoint_best.pth" \
+  --checkpoint-fold1 "${FINAL_RESULTS}/fold_1/checkpoint_best.pth" \
+  --checkpoint-fold2 "${FINAL_RESULTS}/fold_2/checkpoint_best.pth" \
+  --checkpoint-fold3 "${FINAL_RESULTS}/fold_3/checkpoint_best.pth" \
+  --checkpoint-fold4 "${FINAL_RESULTS}/fold_4/checkpoint_best.pth" \
+  --device cuda
+```
 
-Exact reproduction requires the frozen manifest, five-fold split, fold-specific case weights, case metadata, and five fold-matched Dataset005 ResEnc-M initialization checkpoints. Their hashes are recorded, but the files are not distributed.
+This entry point uses Gaussian-weighted sliding windows with patch
+`128×160×112`, step size `0.5`, and all 8 combinations of three-axis mirroring.
+It equally averages the five fold logits, applies softmax, restores four-class
+probabilities to original image space, then performs the same `0.50` regional
+mapping and hierarchy correction as pseudo-label generation. It applies no
+connected-component, volume, or morphological post-processing.
 
-The run is not guaranteed bitwise deterministic because GPU kernels, AMP, augmentation workers, driver/toolchain differences, and scheduling may change numerical results.
+For a functional model/checkpoint/forward check on available hardware:
 
-## Documentation
+```bash
+python scripts/verify_environment.py --strict
+python scripts/smoke_test_model.py --device cuda \
+  --checkpoint "${FINAL_RESULTS}/fold_0/checkpoint_best.pth"
+```
 
-- [Data preparation](docs/DATA_PREPARATION.md)
-- [Exact experiment](docs/EXPERIMENT.md)
-- [Results](docs/RESULTS.md)
-- [Checkpoint hashes](provenance/checkpoint_checksums.md)
+Use `verify_environment.py --strict --exact-hardware` only when the paper's RTX
+5090 model must be required.
+
+## Evaluation
+
+```bash
+python scripts/evaluate_original_gt.py \
+  --prediction-dir "${PREDICTION_DIR}" \
+  --dataset005-labels "${DATASET005_LABELS}" \
+  --splits-json "${SPLITS_JSON}" \
+  --fold all \
+  --output-csv metrics.csv \
+  --summary-csv metrics.summary.csv \
+  --summary-json metrics.summary.json
+```
+
+Dice is computed for ET, TC, and WT. Both-empty prediction/reference regions
+are `NaN` and excluded; one-sided empty regions are `0`. Regional valid-case
+counts are recorded in CSV/JSON summaries, and case-level means use `nanmean`.
+
+## Official validation-server results
+
+The values below are **reported in Table 5 of the paper** and are not claimed
+as outputs recomputed by this public repository.
+
+| Metric | ET | TC | WT | Mean |
+|---|---:|---:|---:|---:|
+| DSC | 0.797 | 0.823 | 0.881 | 0.834 |
+| NSD | 0.547 | 0.501 | 0.481 | 0.510 |
+
+`Acalc = 0.6720`. These NSD values use the validation-server tolerance
+`τ=0.5`; the final ranking used `τ=1`.
+
+## Limitations
+
+Private data, pseudo-label assets, fold-specific sampling weights, and teacher
+and student checkpoints are not distributed, so end-to-end execution requires
+authorized external inputs. RTX 4090 smoke testing is functional verification
+only and does not guarantee numerical identity with the paper's RTX 5090 run.
+MedNeXt, BI-SegMamba, and heterogeneous-ensemble numbers in the paper are
+comparison results; those systems are not implemented here.
+
+## Citation
+
+```bibtex
+@inproceedings{shin2026aistatlab,
+  author    = {Heeseung Shin and Changwon Lim},
+  title     = {AIstatLab at BraTS-GoAT 2026 Task 3: Quality-Controlled
+               Consensus Pseudo-Labeling and Dense Expert Adaptation},
+  booktitle = {BraTS-GoAT 2026},
+  year      = {2026}
+}
+```
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE). Third-party
+attributions and upstream license information are retained in
+`THIRD_PARTY_NOTICES.md` and `third_party/licenses/Apache-2.0.txt`.

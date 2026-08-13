@@ -21,7 +21,6 @@ from mlconsensus_common import (
     expected_channels_from_dataset_json,
     load_json,
     load_nifti,
-    modalities_for_case,
     read_case_ids,
     read_csv_rows,
     str2bool,
@@ -32,15 +31,19 @@ from mlconsensus_common import (
 )
 
 
+DATASET_NAME = "Dataset007_Brats26_Goat_MLConsensusPseudo"
+EXPECTED_TRAINING_CASES = 2334
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build Dataset007 from Dataset005 GT plus ResEnc-M/L consensus pseudo labels.")
     parser.add_argument("--source_dataset_root", "--source-dataset-root", default=str(DATASET005_ROOT))
     parser.add_argument("--pseudolabel_root", "--pseudolabel-root", default=str(OUT_ROOT))
     parser.add_argument("--target_dataset_root", "--target-dataset-root", default=str(DATASET007_ROOT))
-    parser.add_argument("--selection", default="strict", choices=["strict", "relaxed"])
     parser.add_argument("--link_mode", "--link-mode", default="symlink", choices=["symlink", "copy"])
     parser.add_argument("--overwrite", type=str2bool, default=False)
-    parser.add_argument("--copy_unselected_imagesUn", "--copy-unselected-imagesUn", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--expected-labeled-cases", type=int, default=1351)
+    parser.add_argument("--expected-qc-pseudo-cases", type=int, default=983)
     return parser.parse_args()
 
 
@@ -90,7 +93,6 @@ def build_manifest_row(
     source_image: str,
     source_label: str,
     selected: bool,
-    recommended_pseudo_weight: Any,
     qc_row: dict[str, str] | None = None,
     notes: str = "",
 ) -> dict[str, Any]:
@@ -101,7 +103,6 @@ def build_manifest_row(
         "source_image": source_image,
         "source_label": source_label,
         "selected": selected,
-        "recommended_pseudo_weight": recommended_pseudo_weight,
         "dice_ml_et": metric(qc_row, "dice_ML_ET"),
         "dice_ml_tc": metric(qc_row, "dice_ML_TC"),
         "dice_ml_wt": metric(qc_row, "dice_ML_WT"),
@@ -135,24 +136,32 @@ def main() -> None:
     unlabeled_cases = case_ids_from_images(images_un)
     if not original_cases:
         raise RuntimeError(f"No original labeled cases found in {images_tr}")
+    if len(original_cases) != args.expected_labeled_cases:
+        raise RuntimeError(
+            f"Original labeled count is {len(original_cases)}, expected {args.expected_labeled_cases}"
+        )
     if not unlabeled_cases:
         raise RuntimeError(f"No unlabeled cases found in {images_un}")
 
     strict_cases = set(read_case_ids(manifests / "pseudo_labeled_ml_strict_cases.txt"))
-    relaxed_cases = set(read_case_ids(manifests / "pseudo_labeled_ml_relaxed_cases.txt"))
-    exclude_cases = set(read_case_ids(manifests / "exclude_recommended_cases.txt"))
-    selected_source_cases = sorted(strict_cases if args.selection == "strict" else relaxed_cases)
-    if not selected_source_cases:
-        raise RuntimeError(f"No selected pseudo-label cases for selection={args.selection}. Run fusion/QC first.")
+    exclude_cases = set(read_case_ids(manifests / "excluded_cases.txt"))
+    selected_source_cases = sorted(strict_cases)
+    if len(selected_source_cases) != args.expected_qc_pseudo_cases:
+        raise RuntimeError(
+            f"Strict-QC pseudo count is {len(selected_source_cases)}, "
+            f"expected {args.expected_qc_pseudo_cases}"
+        )
 
     missing_labels = [case_id for case_id in selected_source_cases if not (fused_labels / f"{case_id}{FILE_ENDING}").is_file()]
     if missing_labels:
-        raise RuntimeError(f"Missing fused labels for selected cases. first={missing_labels[:5]}")
+        raise RuntimeError(
+            "Missing fused labels for selected cases "
+            f"(n={len(missing_labels)}): {', '.join(missing_labels)}"
+        )
 
     ensure_clean_target(target_root, args.overwrite)
     target_images_tr = ensure_dir(target_root / "imagesTr")
     target_labels_tr = ensure_dir(target_root / "labelsTr")
-    target_images_un = ensure_dir(target_root / "imagesUn")
 
     original_set = set(original_cases)
     source_to_target_pseudo: dict[str, str] = {}
@@ -161,7 +170,7 @@ def main() -> None:
         source_to_target_pseudo[case_id] = target_case_id
 
     rows: list[dict[str, Any]] = []
-    qc = qc_by_case(pseudolabel_root)
+    qc = qc_by_case(pseudolabel_root) if pseudolabel_root.is_dir() else {}
 
     for case_id in original_cases:
         link_case_images(images_tr, target_images_tr, case_id, case_id, channels, args.link_mode)
@@ -175,7 +184,6 @@ def main() -> None:
                 source_image=str(images_tr / f"{case_id}_*{FILE_ENDING}"),
                 source_label=str(src_label),
                 selected=True,
-                recommended_pseudo_weight=1.0,
                 notes="original_ground_truth",
             )
         )
@@ -185,50 +193,50 @@ def main() -> None:
         pseudo_label = fused_labels / f"{source_case_id}{FILE_ENDING}"
         validate_label(pseudo_label, valid_labels)
         copy_or_link(pseudo_label, target_labels_tr / f"{target_case_id}{FILE_ENDING}", args.link_mode)
-        role = "pseudo_labeled_ml_strict" if source_case_id in strict_cases else "pseudo_labeled_ml_relaxed"
         qc_row = qc.get(source_case_id, {})
-        weight = qc_row.get("recommended_pseudo_weight") or (1.0 if role.endswith("strict") else 0.7)
         rows.append(
             build_manifest_row(
                 case_id=target_case_id,
-                role=role,
+                role="pseudo_labeled_qc_strict",
                 source_image=str(images_un / f"{source_case_id}_*{FILE_ENDING}"),
                 source_label=str(pseudo_label),
                 selected=True,
-                recommended_pseudo_weight=weight,
                 qc_row=qc_row,
             )
         )
 
     selected_set = set(selected_source_cases)
     remainder_cases = sorted(set(unlabeled_cases) - selected_set)
-    if args.copy_unselected_imagesUn:
-        for case_id in remainder_cases:
-            link_case_images(images_un, target_images_un, case_id, case_id, channels, args.link_mode)
-            role = "excluded" if case_id in exclude_cases else "ml_unlabeled_remainder"
-            rows.append(
-                build_manifest_row(
-                    case_id=case_id,
-                    role=role,
-                    source_image=str(images_un / f"{case_id}_*{FILE_ENDING}"),
-                    source_label="",
-                    selected=False,
-                    recommended_pseudo_weight=0.0,
-                    qc_row=qc.get(case_id, {}),
-                    notes="not_selected_for_pseudo_training",
-                )
-            )
+    expected_training = len(original_cases) + len(selected_source_cases)
+    if expected_training != EXPECTED_TRAINING_CASES:
+        raise RuntimeError(
+            f"Final training count is {expected_training}, expected {EXPECTED_TRAINING_CASES}"
+        )
+    manifest_metadata = {
+        "student_architecture": "ResEnc-M SoftMoE K4",
+        "softmoe_k": 4,
+        "auxiliary_head": True,
+        "pseudo_source": "ResEnc-M/L probability consensus",
+        "qc_status": "strict",
+        "manifest_training_case_count": expected_training,
+    }
+    for row in rows:
+        row.update(manifest_metadata)
 
     dataset007_json = dict(dataset_json)
-    dataset007_json["name"] = "Dataset007_Brats26_Goat_MLConsensusPseudo"
-    dataset007_json["numTraining"] = len(original_cases) + len(selected_source_cases)
+    dataset007_json["name"] = DATASET_NAME
+    dataset007_json["numTraining"] = expected_training
     write_json(target_root / "dataset.json", dataset007_json)
     write_csv(target_root / "dataset007_case_manifest.csv", rows)
 
     metadata = {
         "timestamp": utc_timestamp(),
-        "dataset_name": "Dataset007_Brats26_Goat_MLConsensusPseudo",
-        "selection": args.selection,
+        "dataset_name": DATASET_NAME,
+        "student_architecture": "ResEnc-M SoftMoE K4",
+        "softmoe_k": 4,
+        "auxiliary_head": True,
+        "pseudo_source": "ResEnc-M/L probability consensus",
+        "qc_status": "strict",
         "link_mode": args.link_mode,
         "source_dataset_root": str(source_root),
         "pseudolabel_root": str(pseudolabel_root),
@@ -238,7 +246,7 @@ def main() -> None:
         "selected_target_cases": [source_to_target_pseudo[c] for c in selected_source_cases],
         "source_to_target_pseudo": source_to_target_pseudo,
         "unlabeled_remainder_cases": remainder_cases,
-        "exclude_recommended_cases": sorted(exclude_cases),
+        "excluded_cases": sorted(exclude_cases),
         "counts": {
             "original_labeled_cases": len(original_cases),
             "selected_pseudo_cases": len(selected_source_cases),
@@ -249,10 +257,9 @@ def main() -> None:
     write_json(target_root / "dataset007_metadata.json", metadata)
 
     print(f"Dataset007 created at: {target_root}")
-    print(f"selection: {args.selection}")
+    print("selection: strict QC")
     print(f"original labeled cases: {len(original_cases)}")
     print(f"selected pseudo cases: {len(selected_source_cases)}")
-    print(f"imagesUn remainder linked: {len(remainder_cases) if args.copy_unselected_imagesUn else 0}")
     print(f"manifest: {target_root / 'dataset007_case_manifest.csv'}")
 
 

@@ -20,20 +20,27 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install lightweight checks
+        run: python -m pip install -r requirements/ci.txt
+
       - name: Compile Python sources
         run: python -m compileall -q scripts src third_party
 
       - name: Validate shell syntax
-        run: find scripts -type f -name '*.sh' -print0 | xargs -0 -r bash -n
+        run: |
+          bash -n config/experiment.env
+          find scripts -type f -name '*.sh' -print0 | xargs -0 -r bash -n
 
-      - name: Validate JSON syntax
-        run: python -c "import json, pathlib; [json.loads(p.read_text()) for p in pathlib.Path('.').rglob('*.json')]"
+      - name: Validate JSON and YAML syntax
+        run: |
+          python -c "import json, pathlib; [json.loads(p.read_text()) for p in pathlib.Path('.').rglob('*.json')]"
+          python -c "import pathlib, yaml; [yaml.safe_load(p.read_text()) for p in pathlib.Path('.').rglob('*.yml')]; [yaml.safe_load(p.read_text()) for p in pathlib.Path('.').rglob('*.yaml')]"
 
       - name: Check public-repository safety
         run: python scripts/verify_public_repo.py .
 
-      - name: Check private-asset verifier CLI
-        run: python scripts/verify_assets.py --help
+      - name: Lightweight unit tests
+        run: python -m pytest -q -m "not integration"
 
-      - name: Verify distributed source checksums
-        run: sha256sum -c provenance/source_checksums.sha256
+      - name: Check whitespace
+        run: git diff --check

@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--splits-json", type=Path, required=True)
     parser.add_argument("--fold", default="all", help="Fold index 0-4 or 'all'.")
     parser.add_argument("--output-csv", type=Path, required=True)
+    parser.add_argument("--summary-csv", type=Path)
     parser.add_argument("--summary-json", type=Path)
     parser.add_argument("--compute-hd95", action="store_true")
     return parser.parse_args()
@@ -33,14 +34,24 @@ def read_seg(path: Path) -> tuple[np.ndarray, tuple[float, float, float]]:
     return arr, spacing_zyx
 
 
+def nanmean(values: list[float] | tuple[float, ...]) -> float:
+    array = np.asarray(values, dtype=np.float64)
+    finite = array[np.isfinite(array)]
+    if finite.size == 0:
+        return float("nan")
+    return float(finite.mean())
+
+
 def dice(pred: np.ndarray, ref: np.ndarray) -> float:
     pred = pred.astype(bool, copy=False)
     ref = ref.astype(bool, copy=False)
     pred_sum = int(pred.sum())
     ref_sum = int(ref.sum())
     if pred_sum == 0 and ref_sum == 0:
-        return 1.0
-    return float(2.0 * np.logical_and(pred, ref).sum() / max(1, pred_sum + ref_sum))
+        return float("nan")
+    if pred_sum == 0 or ref_sum == 0:
+        return 0.0
+    return float(2.0 * np.logical_and(pred, ref).sum() / (pred_sum + ref_sum))
 
 
 def surface(mask: np.ndarray) -> np.ndarray:
@@ -90,6 +101,61 @@ def selected_validation_cases(splits_path: Path, fold_arg: str) -> dict[str, int
     return cases
 
 
+def dice_summary(df: pd.DataFrame) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Summarize publication Dice from regional valid values, never casewise means."""
+    regions: dict[str, dict[str, float | int]] = {}
+    csv_rows: list[dict[str, object]] = []
+    regional_means: list[float] = []
+    for region in ("ET", "TC", "WT"):
+        values = pd.to_numeric(df[f"Dice_{region}"], errors="coerce")
+        valid = values.dropna()
+        mean = float(valid.mean()) if not valid.empty else float("nan")
+        median = float(valid.median()) if not valid.empty else float("nan")
+        valid_n = int(valid.size)
+        excluded_n = int(values.isna().sum())
+        regions[region] = {
+            "mean": mean,
+            "median": median,
+            "valid_n": valid_n,
+            "excluded_both_empty_n": excluded_n,
+        }
+        regional_means.append(mean)
+        csv_rows.append({"region": region, **regions[region]})
+
+    publication_mean = float(np.mean(np.asarray(regional_means, dtype=np.float64)))
+    csv_rows.append(
+        {
+            "region": "ET_TC_WT",
+            "mean": publication_mean,
+            "median": float("nan"),
+            "valid_n": "",
+            "excluded_both_empty_n": "",
+            "statistic": "publication_mean_dsc_from_three_regional_means",
+        }
+    )
+    return {
+        "regions": regions,
+        "publication_mean_dsc": publication_mean,
+        "publication_mean_dsc_definition": (
+            "arithmetic mean of ET, TC, and WT regional means after excluding both-empty case-region pairs"
+        ),
+        "casewise_mean_is_not_publication_mean": True,
+    }, csv_rows
+
+
+def json_safe(value: object) -> object:
+    """Map non-finite values to JSON null without changing in-memory/CSV NaNs."""
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    if isinstance(value, (float, np.floating)) and not np.isfinite(float(value)):
+        return None
+    if isinstance(value, np.integer):
+        return int(value)
+    return value
+
+
 def main() -> None:
     args = parse_args()
     val_cases = selected_validation_cases(args.splits_json, args.fold)
@@ -121,28 +187,51 @@ def main() -> None:
         }
         for region in ("ET", "TC", "WT"):
             row[f"Dice_{region}"] = dice(pred_masks[region], ref_masks[region])
+            row[f"excluded_both_empty_{region}"] = bool(
+                not pred_masks[region].any() and not ref_masks[region].any()
+            )
             if args.compute_hd95:
                 row[f"HD95_{region}"] = hd95(pred_masks[region], ref_masks[region], ref_spacing or spacing)
-        row["mean_dice"] = float(np.mean([row["Dice_ET"], row["Dice_TC"], row["Dice_WT"]]))
+        # Diagnostic only; missing regional values are excluded with nanmean.
+        # It must never be averaged to obtain the publication Mean DSC.
+        row["casewise_mean_dice"] = float(
+            nanmean([row["Dice_ET"], row["Dice_TC"], row["Dice_WT"]])
+        )
         rows.append(row)
 
     df = pd.DataFrame(rows)
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.output_csv, index=False)
 
-    summary = {
+    dice_stats, summary_rows = dice_summary(df)
+    summary: dict[str, object] = {
         "prediction_dir": str(args.prediction_dir),
         "n_cases": int(len(df)),
         "fold": args.fold,
+        "empty_case_policy": {
+            "both_empty": "NaN/excluded",
+            "one_empty": 0.0,
+            "both_non_empty": "standard Dice",
+        },
+        **dice_stats,
     }
-    for col in [c for c in df.columns if c.startswith("Dice_") or c.startswith("HD95_") or c == "mean_dice"]:
-        summary[f"{col}_mean"] = float(pd.to_numeric(df[col], errors="coerce").mean())
-        summary[f"{col}_median"] = float(pd.to_numeric(df[col], errors="coerce").median())
+    # HD95 is reported independently; its empty policy is intentionally unchanged.
+    for col in [c for c in df.columns if c.startswith("HD95_")]:
+        values = pd.to_numeric(df[col], errors="coerce")
+        summary[col] = {
+            "mean": float(values.mean()),
+            "median": float(values.median()),
+            "valid_n": int(values.notna().sum()),
+        }
+    summary_csv = args.summary_csv or args.output_csv.with_suffix(".summary.csv")
+    summary_csv.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(summary_rows).to_csv(summary_csv, index=False)
     summary_path = args.summary_json or args.output_csv.with_suffix(".summary.json")
     with summary_path.open("w") as f:
-        json.dump(summary, f, indent=2, sort_keys=True)
+        json.dump(json_safe(summary), f, indent=2, sort_keys=True, allow_nan=False)
         f.write("\n")
     print(f"Wrote {args.output_csv} rows={len(df)}")
+    print(f"Wrote {summary_csv}")
     print(f"Wrote {summary_path}")
 
 

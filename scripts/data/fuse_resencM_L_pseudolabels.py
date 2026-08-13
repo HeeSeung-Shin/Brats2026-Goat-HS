@@ -9,15 +9,18 @@ from typing import Any
 
 import numpy as np
 
+from brats_regions import (
+    class_probabilities_to_region_masks,
+    fuse_teacher_region_probabilities,
+    region_masks_to_labels,
+)
 from mlconsensus_common import (
     FILE_ENDING,
     IMAGES_UN,
     OUT_ROOT,
-    align_spatial_array_to_ref,
     dice,
     ensure_dir,
     labels_to_regions,
-    load_label_aligned,
     load_nifti,
     load_probabilities_npz,
     normalize_probabilities,
@@ -40,49 +43,46 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--m_pred_dir", default=str(OUT_ROOT / "raw_resencM_5fold"))
     parser.add_argument("--l_pred_dir", default=str(OUT_ROOT / "raw_resencL_5fold"))
     parser.add_argument("--out_root", default=str(OUT_ROOT))
-    parser.add_argument("--mode", default="regionwise", choices=["regionwise"])
     parser.add_argument("--prob_spatial_permutation", default="auto", choices=["auto", "none"])
-    parser.add_argument("--et_threshold", type=float, default=0.50)
-    parser.add_argument("--tc_threshold", type=float, default=0.50)
-    parser.add_argument("--wt_threshold", type=float, default=0.50)
-    parser.add_argument("--w_et_m", type=float, default=0.70)
-    parser.add_argument("--w_tc_m", type=float, default=0.50)
-    parser.add_argument("--w_wt_m", type=float, default=0.40)
-    parser.add_argument("--highconf_threshold", type=float, default=0.75)
-    parser.add_argument("--min_mean_fg_confidence", type=float, default=0.70)
-    parser.add_argument("--max_mean_fg_normalized_entropy", type=float, default=0.35)
-    parser.add_argument("--min_mean_fg_margin", type=float, default=0.20)
-    parser.add_argument("--min_highconf_fg_fraction", type=float, default=0.60)
-    parser.add_argument("--min_foreground_ratio", type=float, default=0.00001)
-    parser.add_argument("--max_foreground_ratio", type=float, default=0.30)
-    parser.add_argument("--min_dice_ml_wt", type=float, default=0.85)
-    parser.add_argument("--min_dice_ml_tc", type=float, default=0.70)
-    parser.add_argument("--min_dice_ml_et", type=float, default=0.50)
-    parser.add_argument("--et_absent_agreement_ok", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--et_one_sided_small_volume_mm3", type=float, default=5.0)
-    parser.add_argument("--relaxed_tc_slack", type=float, default=0.10)
-    parser.add_argument("--relaxed_et_slack", type=float, default=0.15)
-    parser.add_argument("--connectivity", type=int, default=26, choices=[6, 18, 26])
-    parser.add_argument("--min_wt_component_volume_mm3", type=float, default=5.0)
-    parser.add_argument("--min_tc_component_volume_mm3", type=float, default=3.0)
-    parser.add_argument("--min_et_component_volume_mm3", type=float, default=1.0)
-    parser.add_argument("--component_min_mean_probability", type=float, default=0.15)
-    parser.add_argument("--component_min_max_probability", type=float, default=0.30)
-    parser.add_argument("--et_suppression_enabled", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--et_suppression_volume_mm3", type=float, default=1.0)
-    parser.add_argument("--et_suppression_max_probability", type=float, default=0.35)
-    parser.add_argument("--save_fused_probabilities", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--probability_dtype", default="float16", choices=["float16", "float32"])
     parser.add_argument("--max_cases", type=int, default=None)
     parser.add_argument("--case-list", default=None, help="Optional text file with case IDs to process.")
     parser.add_argument("--overwrite", action="store_true")
+    parser.set_defaults(
+        et_threshold=0.50,
+        tc_threshold=0.50,
+        wt_threshold=0.50,
+        agreement_region_threshold=0.50,
+        w_et_m=0.70,
+        w_tc_m=0.50,
+        w_wt_m=0.40,
+        highconf_threshold=0.75,
+        min_mean_fg_confidence=0.70,
+        max_mean_fg_normalized_entropy=0.35,
+        min_mean_fg_margin=0.20,
+        min_highconf_fg_fraction=0.60,
+        min_foreground_ratio=0.00001,
+        max_foreground_ratio=0.30,
+        min_dice_ml_wt=0.85,
+        min_dice_ml_tc=0.70,
+        min_dice_ml_et=0.50,
+        et_absent_agreement_ok=True,
+        et_one_sided_small_volume_mm3=5.0,
+        connectivity=26,
+        min_wt_component_volume_mm3=5.0,
+        min_tc_component_volume_mm3=3.0,
+        min_et_component_volume_mm3=1.0,
+        component_min_mean_probability=0.15,
+        component_min_max_probability=0.30,
+        et_suppression_enabled=True,
+        et_suppression_volume_mm3=1.0,
+        et_suppression_max_probability=0.35,
+    )
     return parser.parse_args()
 
 
 def clean_generated_outputs(out_root: Path, overwrite: bool) -> dict[str, Path]:
     dirs = {
         "fused_labels": out_root / "fused_labels",
-        "fused_probabilities": out_root / "fused_probabilities",
         "qc": out_root / "qc",
         "manifests": out_root / "manifests",
         "reports": out_root / "reports",
@@ -102,41 +102,26 @@ def clean_generated_outputs(out_root: Path, overwrite: bool) -> dict[str, Path]:
 
 
 def make_label_from_regions(mask_et: np.ndarray, mask_tc: np.ndarray, mask_wt: np.ndarray) -> np.ndarray:
-    label = np.zeros(mask_wt.shape, dtype=np.uint8)
-    label[np.logical_and(mask_wt, ~mask_tc)] = 2
-    label[np.logical_and(mask_tc, ~mask_et)] = 1
-    label[mask_et] = 3
-    return label
+    return region_masks_to_labels({"ET": mask_et, "TC": mask_tc, "WT": mask_wt})
 
 
 def region_probabilities(p_m: np.ndarray, p_l: np.ndarray, args: argparse.Namespace) -> dict[str, np.ndarray]:
-    p_m_bg, p_m_ncr, p_m_ed, p_m_et = p_m[0], p_m[1], p_m[2], p_m[3]
-    p_l_bg, p_l_ncr, p_l_ed, p_l_et = p_l[0], p_l[1], p_l[2], p_l[3]
-    _ = p_m_bg, p_l_bg
-    p_m_regions = {
-        "ET": p_m_et,
-        "TC": p_m_ncr + p_m_et,
-        "WT": p_m_ncr + p_m_ed + p_m_et,
-    }
-    p_l_regions = {
-        "ET": p_l_et,
-        "TC": p_l_ncr + p_l_et,
-        "WT": p_l_ncr + p_l_ed + p_l_et,
-    }
-    return {
-        "ET": args.w_et_m * p_m_regions["ET"] + (1.0 - args.w_et_m) * p_l_regions["ET"],
-        "TC": args.w_tc_m * p_m_regions["TC"] + (1.0 - args.w_tc_m) * p_l_regions["TC"],
-        "WT": args.w_wt_m * p_m_regions["WT"] + (1.0 - args.w_wt_m) * p_l_regions["WT"],
-    }
+    return fuse_teacher_region_probabilities(
+        p_m,
+        p_l,
+        weights_m={"ET": args.w_et_m, "TC": args.w_tc_m, "WT": args.w_wt_m},
+    )
 
 
 def initial_label_from_probs(region_probs: dict[str, np.ndarray], args: argparse.Namespace) -> np.ndarray:
-    mask_et = region_probs["ET"] >= args.et_threshold
-    mask_tc = region_probs["TC"] >= args.tc_threshold
-    mask_wt = region_probs["WT"] >= args.wt_threshold
-    mask_tc = np.logical_or(mask_tc, mask_et)
-    mask_wt = np.logical_or(mask_wt, mask_tc)
-    return make_label_from_regions(mask_et, mask_tc, mask_wt)
+    thresholds = {"ET": args.et_threshold, "TC": args.tc_threshold, "WT": args.wt_threshold}
+    masks = {region: region_probs[region] >= threshold for region, threshold in thresholds.items()}
+    return region_masks_to_labels(masks)
+
+
+def teacher_region_masks(probabilities: np.ndarray, threshold: float = 0.50) -> dict[str, np.ndarray]:
+    """Build nested teacher masks from regional probabilities, not argmax labels."""
+    return class_probabilities_to_region_masks(probabilities, threshold=threshold)
 
 
 def apply_component_filtering(label: np.ndarray, region_probs: dict[str, np.ndarray], voxel_volume_mm3: float, args: argparse.Namespace) -> tuple[np.ndarray, dict[str, Any]]:
@@ -172,7 +157,10 @@ def apply_component_filtering(label: np.ndarray, region_probs: dict[str, np.ndar
     if args.et_suppression_enabled:
         et_volume_mm3 = float(filtered_et.sum() * voxel_volume_mm3)
         max_et_prob = float(region_probs["ET"][filtered_et].max()) if filtered_et.any() else 0.0
-        if et_volume_mm3 < args.et_suppression_volume_mm3 and max_et_prob < args.et_suppression_max_probability:
+        probability_threshold = float(
+            np.asarray(args.et_suppression_max_probability, dtype=region_probs["ET"].dtype)
+        )
+        if et_volume_mm3 < args.et_suppression_volume_mm3 and max_et_prob < probability_threshold:
             filtered_et[:] = False
             et_stats["et_suppressed"] = True
             et_stats["et_suppression_volume_mm3"] = et_volume_mm3
@@ -200,9 +188,8 @@ def apply_component_filtering(label: np.ndarray, region_probs: dict[str, np.ndar
     return filtered_label, stats
 
 
-def region_agreement_metrics(label_m: np.ndarray, label_l: np.ndarray, label_fused: np.ndarray, voxel_volume_mm3: float) -> dict[str, Any]:
-    regions_m = labels_to_regions(label_m)
-    regions_l = labels_to_regions(label_l)
+def region_agreement_metrics(regions_m: dict[str, np.ndarray], regions_l: dict[str, np.ndarray], label_fused: np.ndarray, voxel_volume_mm3: float) -> dict[str, Any]:
+    """Compute teacher agreement; ET clinical exceptions remain explicit below."""
     regions_fused = labels_to_regions(label_fused)
     metrics: dict[str, Any] = {}
     for region in ("ET", "TC", "WT"):
@@ -258,23 +245,16 @@ def assign_selection(row: dict[str, Any], args: argparse.Namespace, notes: list[
     et_pass = et_agreement_pass(row, args, notes)
     strict_agree = wt_pass and tc_pass and et_pass
 
-    tc_relaxed = float(row["dice_ML_TC"]) >= max(0.0, args.min_dice_ml_tc - args.relaxed_tc_slack)
-    et_relaxed = et_pass or float(row["dice_ML_ET"]) >= max(0.0, args.min_dice_ml_et - args.relaxed_et_slack)
-    relaxed_agree = wt_pass and ((tc_pass and et_relaxed) or (et_pass and tc_relaxed))
-
-    if conf_pass and strict_agree:
-        status = "strict"
-    elif conf_pass and relaxed_agree:
-        status = "relaxed"
-    else:
-        status = "exclude"
+    status = "strict" if conf_pass and strict_agree else "exclude"
     passes = {
         "confidence_pass": conf_pass,
         "ml_wt_pass": wt_pass,
         "ml_tc_pass": tc_pass,
         "ml_et_pass": et_pass,
         "ml_agreement_pass_strict": strict_agree,
-        "ml_agreement_pass_relaxed": relaxed_agree,
+        "I_conf": conf_pass,
+        "I_agree": strict_agree,
+        "I_strict": conf_pass and strict_agree,
     }
     return status, passes
 
@@ -295,8 +275,6 @@ def failure_row(case_id: str, reason: str) -> dict[str, Any]:
         "selection_status": "failure",
         "failure_reason": reason,
         "selected_strict": False,
-        "selected_relaxed": False,
-        "recommended_pseudo_weight": 0.0,
     }
 
 
@@ -315,8 +293,6 @@ def process_case(case_id: str, args: argparse.Namespace, dirs: dict[str, Path]) 
     paths = {
         "m_prob": m_dir / f"{case_id}.npz",
         "l_prob": l_dir / f"{case_id}.npz",
-        "m_label": m_dir / f"{case_id}{FILE_ENDING}",
-        "l_label": l_dir / f"{case_id}{FILE_ENDING}",
     }
     missing = [name for name, path in paths.items() if not path.is_file()]
     if missing:
@@ -327,8 +303,6 @@ def process_case(case_id: str, args: argparse.Namespace, dirs: dict[str, Path]) 
         p_l, key_l, transform_l = load_probabilities_npz(paths["l_prob"], ref_shape, mode=spatial_mode)
         if p_m.shape != p_l.shape:
             return failure_row(case_id, f"M/L probability shape mismatch: {p_m.shape} vs {p_l.shape}")
-        label_m, label_transform_m = load_label_aligned(paths["m_label"], ref_shape, mode=spatial_mode)
-        label_l, label_transform_l = load_label_aligned(paths["l_label"], ref_shape, mode=spatial_mode)
     except Exception as exc:
         return failure_row(case_id, str(exc))
 
@@ -359,19 +333,13 @@ def process_case(case_id: str, args: argparse.Namespace, dirs: dict[str, Path]) 
     except Exception as exc:
         return failure_row(case_id, f"failed to save/validate fused label: {exc}")
 
-    if args.save_fused_probabilities:
-        dtype = np.float16 if args.probability_dtype == "float16" else np.float32
-        np.savez_compressed(
-            dirs["fused_probabilities"] / f"{case_id}.npz",
-            p_ET=region_probs["ET"].astype(dtype, copy=False),
-            p_TC=region_probs["TC"].astype(dtype, copy=False),
-            p_WT=region_probs["WT"].astype(dtype, copy=False),
-        )
-
     p4avg = normalize_probabilities(0.5 * p_m + 0.5 * p_l)
     foreground = fused_label > 0
     quality = probability_quality(p4avg, foreground, highconf_threshold=args.highconf_threshold)
-    agreement = region_agreement_metrics(label_m, label_l, fused_label, voxel_volume_mm3)
+    teacher_masks_m = teacher_region_masks(p_m, threshold=args.agreement_region_threshold)
+    teacher_masks_l = teacher_region_masks(p_l, threshold=args.agreement_region_threshold)
+    agreement = region_agreement_metrics(
+        teacher_masks_m, teacher_masks_l, fused_label, voxel_volume_mm3)
     foreground_ratio = float(foreground.mean())
     status_row: dict[str, Any] = {
         "case_id": case_id,
@@ -381,8 +349,10 @@ def process_case(case_id: str, args: argparse.Namespace, dirs: dict[str, Path]) 
         "prob_key_L": key_l,
         "prob_transform_M": transform_m,
         "prob_transform_L": transform_l,
-        "label_transform_M": label_transform_m,
-        "label_transform_L": label_transform_l,
+        "agreement_source": "thresholded_teacher_region_probabilities",
+        "agreement_region_threshold": args.agreement_region_threshold,
+        "agreement_hierarchy_correction": True,
+        "teacher_argmax_used_for_qc": False,
         "probability_sum_max_abs_error_M": sum_error_m,
         "probability_sum_max_abs_error_L": sum_error_l,
         "foreground_ratio_fused": foreground_ratio,
@@ -395,8 +365,6 @@ def process_case(case_id: str, args: argparse.Namespace, dirs: dict[str, Path]) 
     status_row.update(passes)
     status_row["selection_status"] = status
     status_row["selected_strict"] = status == "strict"
-    status_row["selected_relaxed"] = status in {"strict", "relaxed"}
-    status_row["recommended_pseudo_weight"] = 1.0 if status == "strict" else (0.7 if status == "relaxed" else 0.0)
     status_row["notes"] = ";".join(notes)
     return status_row
 
@@ -420,20 +388,11 @@ def main() -> None:
         rows.append(process_case(case_id, args, dirs))
 
     strict_cases = sorted(row["case_id"] for row in rows if row.get("selection_status") == "strict")
-    relaxed_cases = sorted(row["case_id"] for row in rows if row.get("selection_status") in {"strict", "relaxed"})
-    disagreement_cases = sorted(
-        row["case_id"]
-        for row in rows
-        if row.get("selection_status") not in {"failure"}
-        and (not row.get("ml_agreement_pass_strict", False) or row.get("notes"))
-    )
     exclude_cases = sorted(row["case_id"] for row in rows if row.get("selection_status") in {"exclude", "failure"})
 
     write_csv(dirs["qc"] / "pseudolabel_qc_ml.csv", rows)
     write_case_ids(dirs["manifests"] / "pseudo_labeled_ml_strict_cases.txt", strict_cases)
-    write_case_ids(dirs["manifests"] / "pseudo_labeled_ml_relaxed_cases.txt", relaxed_cases)
-    write_case_ids(dirs["manifests"] / "ml_disagreement_cases.txt", disagreement_cases)
-    write_case_ids(dirs["manifests"] / "exclude_recommended_cases.txt", exclude_cases)
+    write_case_ids(dirs["manifests"] / "excluded_cases.txt", exclude_cases)
 
     summary = {
         "timestamp": utc_timestamp(),
@@ -444,16 +403,23 @@ def main() -> None:
         "num_rows": len(rows),
         "counts": {
             "strict": len(strict_cases),
-            "relaxed_including_strict": len(relaxed_cases),
-            "relaxed_extra": len(set(relaxed_cases) - set(strict_cases)),
-            "ml_disagreement_or_warning": len(disagreement_cases),
-            "exclude_recommended": len(exclude_cases),
+            "excluded": len(exclude_cases),
             "failure": sum(1 for row in rows if row.get("selection_status") == "failure"),
         },
         "thresholds": {
             "et_threshold": args.et_threshold,
             "tc_threshold": args.tc_threshold,
             "wt_threshold": args.wt_threshold,
+            "agreement": {
+                "source": "thresholded_teacher_region_probabilities",
+                "region_threshold": args.agreement_region_threshold,
+                "hierarchy_correction": True,
+                "teacher_argmax_used_for_qc": False,
+                "min_dice_wt": args.min_dice_ml_wt,
+                "min_dice_tc": args.min_dice_ml_tc,
+                "min_dice_et": args.min_dice_ml_et,
+                "one_sided_et_volume_mm3_strictly_less_than": args.et_one_sided_small_volume_mm3,
+            },
             "w_et_m": args.w_et_m,
             "w_tc_m": args.w_tc_m,
             "w_wt_m": args.w_wt_m,
@@ -491,8 +457,7 @@ def main() -> None:
 
     print("FUSION_QC_DONE")
     print(f"strict cases: {len(strict_cases)}")
-    print(f"relaxed cases including strict: {len(relaxed_cases)}")
-    print(f"exclude recommended: {len(exclude_cases)}")
+    print(f"excluded cases: {len(exclude_cases)}")
     print(f"QC CSV: {dirs['qc'] / 'pseudolabel_qc_ml.csv'}")
     print(f"Summary: {dirs['reports'] / 'selection_summary_ml.json'}")
 

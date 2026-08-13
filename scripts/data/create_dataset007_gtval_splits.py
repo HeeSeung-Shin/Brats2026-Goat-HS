@@ -70,14 +70,15 @@ def main() -> None:
     pseudo_cases = sorted(
         row["case_id"]
         for row in rows
-        if row.get("role") in {"pseudo_labeled_ml_strict", "pseudo_labeled_ml_relaxed"} and row.get("selected") in {"True", "true", "1", "yes", True}
+        if row.get("role") == "pseudo_labeled_qc_strict"
+        and row.get("selected") in {"True", "true", "1", "yes", True}
     )
     original_set = set(original_cases)
     pseudo_set = set(pseudo_cases)
     if not original_cases:
         raise RuntimeError("No original_labeled cases in Dataset007 manifest")
     if not pseudo_cases:
-        raise RuntimeError("No selected pseudo-labeled cases in Dataset007 manifest")
+        raise RuntimeError("No selected pseudo-labeled cases in non-labeled-only manifest")
 
     dataset005_splits_path = Path(args.dataset005_splits)
     dataset005_splits = load_json(dataset005_splits_path)
@@ -124,6 +125,11 @@ def main() -> None:
         out_dir / "splits_dataset007_summary.json",
         {
             "timestamp": utc_timestamp(),
+            "student_architecture": rows[0].get("student_architecture", ""),
+            "softmoe_k": rows[0].get("softmoe_k", ""),
+            "auxiliary_head": rows[0].get("auxiliary_head", ""),
+            "pseudo_source": rows[0].get("pseudo_source", ""),
+            "qc_status": rows[0].get("qc_status", ""),
             "dataset007_root": str(dataset007_root),
             "dataset005_splits": str(dataset005_splits_path),
             "output_json": str(output_json),

@@ -60,7 +60,10 @@ def git_visible_files(root: Path) -> list[Path] | None:
         )
     except (OSError, subprocess.CalledProcessError):
         return None
-    return [root / os.fsdecode(item) for item in result.stdout.split(b"\0") if item]
+    paths = [root / os.fsdecode(item) for item in result.stdout.split(b"\0") if item]
+    # The index still lists unstaged deletions. Scan the working tree that would
+    # actually be published after those deletions are recorded.
+    return [path for path in paths if path.exists() or path.is_symlink()]
 
 
 def tree_files(root: Path) -> list[Path]:

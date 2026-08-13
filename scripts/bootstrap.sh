@@ -8,22 +8,16 @@ source "${REPO_ROOT}/config/experiment.env"
 
 log() { printf '[bootstrap] %s\n' "$*"; }
 die() { printf '[bootstrap] ERROR: %s\n' "$*" >&2; exit 1; }
-warn() { printf '[bootstrap] WARNING: %s\n' "$*" >&2; }
 print_cmd() { printf '+'; printf ' %q' "$@"; printf '\n'; }
 run() { print_cmd "$@"; [[ "${DRY_RUN}" == "1" ]] || "$@"; }
 
 [[ "${DRY_RUN}" == "0" || "${DRY_RUN}" == "1" ]] || die "DRY_RUN must be 0 or 1"
-[[ "${ALLOW_NONEXACT}" == "0" || "${ALLOW_NONEXACT}" == "1" ]] || die "ALLOW_NONEXACT must be 0 or 1"
 command -v git >/dev/null 2>&1 || die "git is required"
 command -v "${PYTHON_BOOTSTRAP_BIN}" >/dev/null 2>&1 || die "Python not found: ${PYTHON_BOOTSTRAP_BIN}"
 
 actual_python="$("${PYTHON_BOOTSTRAP_BIN}" -c 'import platform; print(platform.python_version())')"
 if [[ "${actual_python}" != "${EXPECTED_PYTHON_VERSION}" ]]; then
-  if [[ "${ALLOW_NONEXACT}" == "1" ]]; then
-    warn "Python ${actual_python} differs from expected ${EXPECTED_PYTHON_VERSION}."
-  else
-    die "Exact bootstrap requires Python ${EXPECTED_PYTHON_VERSION}; found ${actual_python}."
-  fi
+  die "Bootstrap requires Python ${EXPECTED_PYTHON_VERSION}; found ${actual_python}."
 fi
 
 if [[ -d "${NNUNET_SOURCE_DIR}/.git" ]]; then

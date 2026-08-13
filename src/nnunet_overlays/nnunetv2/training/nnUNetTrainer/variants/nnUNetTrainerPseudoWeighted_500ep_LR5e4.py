@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import csv
-import os
 from collections import Counter
-from pathlib import Path
 from typing import Iterable
 
 import numpy as np
@@ -12,10 +9,11 @@ from torch import autocast
 
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.helpers import dummy_context
+from nnunetv2.training.nnUNetTrainer.variants.method_semantics import pseudo_label_weight
 
 
 class nnUNetTrainerPseudoWeighted_500ep_LR5e4(nnUNetTrainer):
-    """Dataset006 supervised mixed fine-tuning trainer.
+    """Mixed-supervision base with the paper's fixed pseudo-label curriculum.
 
     This trainer keeps the default nnU-Net loss, optimizer, scheduler, and
     augmentation path. It only changes:
@@ -23,12 +21,10 @@ class nnUNetTrainerPseudoWeighted_500ep_LR5e4(nnUNetTrainer):
     - initial_lr = 5e-4
     - pseudo-labeled samples are down-weighted at loss aggregation time.
 
-    Dataset006 roles are read from dataset006_case_manifest.csv. Validation is
-    not modified and should contain original_labeled cases only via splits.
+    The final Dataset007 subclass supplies strict annotated/pseudo case roles.
+    Validation is not modified and contains annotated cases only via splits.
     """
 
-    pseudo_weight_mode_env = "DATASET006_PSEUDO_WEIGHT_MODE"
-    pseudo_fixed_weight_env = "DATASET006_PSEUDO_FIXED_WEIGHT"
     custom_logger_keys = (
         "pseudo_lambda",
         "train_loss_gt_unweighted",
@@ -41,23 +37,13 @@ class nnUNetTrainerPseudoWeighted_500ep_LR5e4(nnUNetTrainer):
         super().__init__(plans, configuration, fold, dataset_json, device)
         self.num_epochs = 500
         self.initial_lr = 5e-4
-        self.pseudo_weight_mode = os.environ.get(self.pseudo_weight_mode_env, "ramp").strip().lower()
-        self.pseudo_fixed_weight = float(os.environ.get(self.pseudo_fixed_weight_env, "0.5"))
-        if self.pseudo_weight_mode not in {"ramp", "fixed"}:
-            raise RuntimeError(
-                f"{self.pseudo_weight_mode_env} must be 'ramp' or 'fixed', got {self.pseudo_weight_mode!r}"
-            )
         self.role_by_case = self._load_case_roles()
-        self._missing_role_warnings: set[str] = set()
         self._ensure_logger_keys()
         counts = Counter(self.role_by_case.values())
-        self.print_to_log_file("Dataset006 pseudo-weighted trainer initialized")
+        self.print_to_log_file("Final mixed-supervision trainer base initialized")
         self.print_to_log_file(f"  num_epochs: {self.num_epochs}")
         self.print_to_log_file(f"  initial_lr: {self.initial_lr}")
-        self.print_to_log_file(f"  pseudo_weight_mode: {self.pseudo_weight_mode}")
-        self.print_to_log_file(f"  pseudo_fixed_weight: {self.pseudo_fixed_weight}")
         self.print_to_log_file(f"  manifest role counts: {dict(counts)}")
-        self.print_to_log_file("  UnCL/DyCON unlabeled cases are not used by this supervised trainer.")
 
     def _ensure_logger_keys(self) -> None:
         local_logger = getattr(self.logger, "local_logger", None)
@@ -70,40 +56,11 @@ class nnUNetTrainerPseudoWeighted_500ep_LR5e4(nnUNetTrainer):
         super().load_checkpoint(filename_or_checkpoint)
         self._ensure_logger_keys()
 
-    def _manifest_path(self) -> Path:
-        raw_root = Path(os.environ.get("nnUNet_raw", "nnUNet_data/nnUNet_raw"))
-        return raw_root / self.plans_manager.dataset_name / "dataset006_case_manifest.csv"
-
     def _load_case_roles(self) -> dict[str, str]:
-        path = self._manifest_path()
-        if not path.is_file():
-            raise RuntimeError(
-                f"Missing Dataset006 manifest required for pseudo weighting: {path}. "
-                "Run validate_dataset006_ready.py and make sure nnUNet_raw is set correctly."
-            )
-        roles: dict[str, str] = {}
-        with path.open(newline="") as f:
-            reader = csv.DictReader(f)
-            if "case_id" not in (reader.fieldnames or []):
-                raise RuntimeError(f"{path} does not contain a case_id column")
-            role_column = "role" if "role" in (reader.fieldnames or []) else "source_type"
-            if role_column not in (reader.fieldnames or []):
-                raise RuntimeError(f"{path} must contain either role or source_type column")
-            for row in reader:
-                roles[row["case_id"]] = row[role_column]
-        if "pseudo_labeled_highconf" not in set(roles.values()):
-            raise RuntimeError(f"{path} contains no pseudo_labeled_highconf cases")
-        return roles
+        raise NotImplementedError("The final Dataset007 trainer must supply manifest case roles")
 
     def _pseudo_lambda(self) -> float:
-        if self.pseudo_weight_mode == "fixed":
-            return self.pseudo_fixed_weight
-        epoch = int(self.current_epoch)
-        if epoch < 50:
-            return 0.3
-        if epoch < 150:
-            return 0.3 + (epoch - 50) / 100.0 * 0.4
-        return 0.7
+        return pseudo_label_weight(int(self.current_epoch))
 
     @staticmethod
     def _index_nested_batch(value, indices: torch.Tensor):
@@ -117,19 +74,14 @@ class nnUNetTrainerPseudoWeighted_500ep_LR5e4(nnUNetTrainer):
             case_id = str(key)
             role = self.role_by_case.get(case_id)
             if role is None:
-                role = "original_labeled"
-                if case_id not in self._missing_role_warnings:
-                    self._missing_role_warnings.add(case_id)
-                    self.print_to_log_file(
-                        f"WARNING: case {case_id} is missing from Dataset006 manifest; treating it as original_labeled."
-                    )
+                raise RuntimeError(f"Training case {case_id!r} is missing from the final manifest")
             roles.append(role)
         return roles
 
     def on_train_epoch_start(self):
         super().on_train_epoch_start()
         self._ensure_logger_keys()
-        self.print_to_log_file(f"Dataset006 pseudo lambda: {self._pseudo_lambda():.4f}")
+        self.print_to_log_file(f"Pseudo-label loss weight: {self._pseudo_lambda():.4f}")
         self.logger.log("pseudo_lambda", self._pseudo_lambda(), self.current_epoch)
 
     def train_step(self, batch: dict) -> dict:
@@ -147,7 +99,7 @@ class nnUNetTrainerPseudoWeighted_500ep_LR5e4(nnUNetTrainer):
         pseudo_indices = [idx for idx, role in enumerate(roles) if role == "pseudo_labeled_highconf"]
         unknown_roles = sorted({role for role in roles if role not in {"original_labeled", "pseudo_labeled_highconf"}})
         if unknown_roles:
-            raise RuntimeError(f"Unsupported Dataset006 case roles in supervised batch: {unknown_roles}")
+            raise RuntimeError(f"Unsupported final manifest roles in supervised batch: {unknown_roles}")
 
         data = batch["data"].to(self.device, non_blocking=True)
         target = batch["target"]
@@ -219,7 +171,7 @@ class nnUNetTrainerPseudoWeighted_500ep_LR5e4(nnUNetTrainer):
         self.logger.log("train_batch_n_gt_mean", mean_n_gt, self.current_epoch)
         self.logger.log("train_batch_n_pseudo_mean", mean_n_pseudo, self.current_epoch)
         self.print_to_log_file(
-            "Dataset006 batch roles: "
+            "Mixed-supervision batch roles: "
             f"mean_n_gt={mean_n_gt:.3f}, mean_n_pseudo={mean_n_pseudo:.3f}, "
             f"mean_loss_gt={mean_gt:.6f}, mean_loss_pseudo={mean_pseudo:.6f}"
         )

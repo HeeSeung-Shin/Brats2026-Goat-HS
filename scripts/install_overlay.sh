@@ -14,7 +14,6 @@ print_cmd() { printf '+'; printf ' %q' "$@"; printf '\n'; }
 run() { print_cmd "$@"; [[ "${DRY_RUN}" == "1" ]] || "$@"; }
 
 [[ "${DRY_RUN}" == "0" || "${DRY_RUN}" == "1" ]] || die "DRY_RUN must be 0 or 1"
-[[ "${ALLOW_NONEXACT}" == "0" || "${ALLOW_NONEXACT}" == "1" ]] || die "ALLOW_NONEXACT must be 0 or 1"
 [[ -d "${NNUNET_OVERLAY_DIR}/nnunetv2" ]] || die "Missing overlay tree: ${NNUNET_OVERLAY_DIR}/nnunetv2"
 
 if [[ ! -d "${NNUNET_SOURCE_DIR}/.git" ]]; then
@@ -26,11 +25,7 @@ if [[ ! -d "${NNUNET_SOURCE_DIR}/.git" ]]; then
 else
   current="$(git -C "${NNUNET_SOURCE_DIR}" rev-parse HEAD)"
   if [[ "${current}" != "${NNUNET_COMMIT}" ]]; then
-    if [[ "${ALLOW_NONEXACT}" == "1" ]]; then
-      warn "Installing overlay onto non-exact nnU-Net commit ${current}; expected ${NNUNET_COMMIT}."
-    else
-      die "nnU-Net commit mismatch: expected ${NNUNET_COMMIT}, got ${current}"
-    fi
+    die "nnU-Net commit mismatch: expected ${NNUNET_COMMIT}, got ${current}"
   fi
 fi
 
