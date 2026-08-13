@@ -12,4 +12,3 @@ def test_copy_or_link_copy_mode(tmp_path) -> None:
 
     assert destination.read_bytes() == source.read_bytes()
     assert not destination.is_symlink()
-
